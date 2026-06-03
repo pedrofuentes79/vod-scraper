@@ -1,0 +1,16 @@
+[Unit]
+Description=Download the latest full video from the tracked YouTube playlist
+After=network-online.target
+Wants=network-online.target
+# After a successful download, register any new files in the media-server DB.
+OnSuccess=vod-ingest.service
+
+[Service]
+Type=oneshot
+User=dietpi
+Group=dietpi
+Nice=15
+IOSchedulingClass=idle
+# A long video can take a while on a Pi; the default 90 s start timeout would kill it.
+TimeoutStartSec=7200
+ExecStart=/usr/local/bin/vod-download.sh

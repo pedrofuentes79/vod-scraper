@@ -1,0 +1,4 @@
+# Local deployment config — holds private values (tracked playlist, paths, TZ).
+# Only the *.example template is committed.
+vod-scraper/vod-scraper.conf
+/etc/vod-scraper.conf

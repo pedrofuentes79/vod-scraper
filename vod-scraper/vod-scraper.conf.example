@@ -1,0 +1,44 @@
+# vod-scraper configuration — EXAMPLE
+#
+# Copy to vod-scraper.conf (next to the scripts) or /etc/vod-scraper.conf and fill
+# in your values. Sourced as bash by BOTH vod-download.sh and vod-ingest.sh, so use
+# plain VAR=value lines (no spaces around =, quote values).
+# Lookup order: $VOD_CONFIG, then next to the scripts, then /etc/vod-scraper.conf.
+
+# --- source & download ------------------------------------------------------
+
+# REQUIRED. The YouTube playlist URL to track (newest-first; may also hold shorter
+# cuts/clips that the duration gate below filters out).
+PLAYLIST="https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID"
+
+# Where downloads are stored — and where the media server serves them from.
+DEST="/home/dietpi/media_store"
+
+# yt-dlp dedup archive. Empty -> $DEST/downloaded.txt.
+ARCHIVE=""
+
+MIN_DURATION=5400        # full-video duration gate (s); shorter entries are ignored.
+SCAN_DEPTH=50            # newest playlist entries to scan for a full video.
+KEEP_LATEST=7            # videos kept on disk; older ones rotated out.
+
+# Optional accept-window (both empty = disabled). When set, only a video published
+# within [yesterday WINDOW_START, today WINDOW_END] (in TZ_NAME) is downloaded —
+# handy for a daily broadcast you fetch the morning after. Example: "22:30" / "17:00".
+WINDOW_START=""
+WINDOW_END=""
+
+MERGE_FORMAT="mp4"       # output container.
+EXTRACT_AUDIO=true       # also write a lossless .m4a sidecar (e.g. for background audio).
+
+# Optional yt-dlp cookies file (Netscape format). Leave empty for a public playlist.
+# Set only if YouTube starts gating downloads.
+COOKIES=""
+
+# All dates/times are evaluated in this timezone regardless of the box clock.
+TZ_NAME="UTC"
+
+# --- database (media server) ------------------------------------------------
+
+# The media-server SQLite database that vod-ingest.sh writes rows into. Start the
+# media server once first so it creates the DB via its migrations.
+DB_PATH="/home/dietpi/media-server/media.db"

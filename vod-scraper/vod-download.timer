@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the playlist downloader on a schedule
+
+[Timer]
+# Adjust to taste. The timezone is pinned explicitly so the schedule is correct
+# regardless of the box clock (e.g. a box kept on UTC). Example below runs the
+# downloader every weekday morning in the configured timezone.
+OnCalendar=Mon..Fri 09:00 UTC
+# If the box was off at the scheduled time, run once at the next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
