@@ -38,20 +38,23 @@ re-downloading). Both scripts read their settings from **`vod-scraper.conf`**.
 
 ## 1. Prerequisites (on the Pi)
 
-`ffmpeg` (merge video+audio, and `ffprobe` for duration) and `sqlite3` (DB writes).
+`ffmpeg` (merge video+audio, and `ffprobe` for duration), `sqlite3` (DB writes),
+and `jq` (reads chapter markers out of yt-dlp's info.json).
 
 ```bash
 # yt-dlp — official build, uses system python3 (works on ARM), self-updates with -U
 sudo wget -q https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
 sudo chmod a+rx /usr/local/bin/yt-dlp
 
-# ffmpeg (provides ffprobe) + sqlite3
-sudo apt-get update && sudo apt-get install -y ffmpeg sqlite3
+# ffmpeg (provides ffprobe) + sqlite3 + jq
+sudo apt-get update && sudo apt-get install -y ffmpeg sqlite3 jq
 ```
 
 The media server must have created its database (run it once so migrations apply)
 at the `DB_PATH` set in `vod-scraper.conf`. The ingest expects a `media` table with
-`(date, title, video_path, audio_path, progress_seconds, total_seconds)` columns.
+`(date, title, video_path, audio_path, progress_seconds, total_seconds, chapters)`
+columns. (`jq` is optional — without it the ingest still works, just stores no
+chapters.)
 
 ## 2. Install the scripts, config + units
 
@@ -102,10 +105,17 @@ the scripts, then `/etc/vod-scraper.conf`). Both scripts source it.
 `vod-ingest.sh` reconciles `DEST` against the media-server DB: for every `*.mp4`
 (plus its `.m4a` sidecar) not already present, it reads the duration with `ffprobe`
 and INSERTs a row (`date`, `title`, `video_path`, `audio_path` as absolute paths,
-`progress_seconds=0`, `total_seconds=<duration>`). It's idempotent — re-runs only
-add genuinely new files. `date`/`title` are parsed from the
+`progress_seconds=0`, `total_seconds=<duration>`, `chapters`). It's idempotent —
+re-runs only add genuinely new files. `date`/`title` are parsed from the
 `YYYY-MM-DD - Title [id].mp4` filename, where the date is the date the downloader
 stamped in (see notes).
+
+**Chapters:** the downloader passes `--write-info-json`, so each video gets a
+`<stem>.info.json` sidecar. The ingest distills its YouTube chapter markers into a
+compact `[{start, title}]` JSON array (via `jq`) and stores it in the `chapters`
+column; the media server serves it so the player can offer chapter navigation.
+Videos without chapters (or without `jq`) just get an empty array. The file is
+never split — chapters are metadata only.
 
 It also **prunes**: rows under `DEST` whose file no longer exists on disk (e.g.
 videos the downloader rotated out) are deleted, so the catalog never shows dead

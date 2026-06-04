@@ -75,9 +75,19 @@ for video in "$DEST"/*.mp4; do
     dur="${dur%.*}"               # drop fractional part
     [[ "$dur" =~ ^[0-9]+$ ]] && (( dur > 0 )) || dur=7200
 
+    # Chapters: distill the info.json sidecar (written by the downloader's
+    # --write-info-json) into a compact [{start,title}] array for the player. No
+    # jq or no sidecar -> empty array, and the player simply hides the chapter list.
+    info="$DEST/${stem}.info.json"
+    chapters="[]"
+    if [[ -f "$info" ]] && command -v jq >/dev/null; then
+        chapters="$(jq -c '[.chapters[]? | {start: .start_time, title: .title}]' -- "$info" 2>/dev/null || true)"
+        [[ -n "$chapters" ]] || chapters="[]"
+    fi
+
     sqlite3 "$DB_PATH" \
-        "INSERT INTO media (date, title, video_path, audio_path, progress_seconds, total_seconds)
-         VALUES ('$(esc "$date")', '$(esc "$title")', '$(esc "$video")', '$(esc "$audio")', 0, $dur);"
+        "INSERT INTO media (date, title, video_path, audio_path, progress_seconds, total_seconds, chapters)
+         VALUES ('$(esc "$date")', '$(esc "$title")', '$(esc "$video")', '$(esc "$audio")', 0, $dur, '$(esc "$chapters")');"
     echo "registered: $title  (${dur}s)"
     added=$((added + 1))
 done
