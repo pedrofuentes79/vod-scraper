@@ -1,5 +1,5 @@
 [Unit]
-Description=Register downloaded videos in the media-server DB
+Description=Register downloaded recordings in the media-server DB
 After=vod-download.service
 
 [Service]
