@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 #
-# vod-ingest.sh — register downloaded videos in the media-server SQLite DB.
+# vod-ingest.sh — register downloaded recordings in the media-server SQLite DB.
 #
-# Standalone & idempotent reconciler: scans $DEST for *.mp4 (+ its matching .m4a
-# sidecar) and INSERTs a row for any file not already in the database. Safe to
-# run anytime — manually, or via vod-ingest.service after a download. Files that
-# are already registered are skipped, so re-runs are no-ops.
+# Standalone & idempotent reconciler: scans $DEST for *.m4a and INSERTs a row for
+# any file not already in the database. Safe to run anytime — manually, or via
+# vod-ingest.service after a download. Files that are already registered are
+# skipped, so re-runs are no-ops.
+#
+# The catalog is audio-first (the player streams /api/audio), so the .m4a is the
+# unit of ingest. A legacy .mp4 left over from when the downloader also fetched
+# video is recorded in video_path when it happens to sit next to the audio;
+# otherwise video_path is stored empty.
 #
 # Deliberately knows nothing about downloading: the downloader fetches files,
 # this reconciles the directory against the DB. Config (DEST, DB_PATH) is loaded
@@ -18,6 +23,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # defaults (overridden by config)
 DEST="/home/dietpi/media_store"
 DB_PATH="/home/dietpi/media-server/media.db"
+AUDIO_FORMAT="m4a"
 
 for _cfg in "${VOD_CONFIG:-}" "$SCRIPT_DIR/vod-scraper.conf" "/etc/vod-scraper.conf"; do
     if [[ -n "$_cfg" && -f "$_cfg" ]]; then
@@ -44,17 +50,18 @@ esc() { local s="$1"; printf '%s' "${s//\'/\'\'}"; }
 
 added=0
 shopt -s nullglob
-for video in "$DEST"/*.mp4; do
-    video="$(realpath -- "$video")"
-    stem="$(basename -- "$video")"; stem="${stem%.mp4}"
+for audio in "$DEST"/*."$AUDIO_FORMAT"; do
+    audio="$(realpath -- "$audio")"
+    stem="$(basename -- "$audio")"; stem="${stem%.$AUDIO_FORMAT}"
 
-    audio="$DEST/${stem}.m4a"
-    if [[ -f "$audio" ]]; then audio="$(realpath -- "$audio")"; else audio=""; fi
+    # Legacy companion video, if one is still on disk. New downloads are audio-only.
+    video="$DEST/${stem}.mp4"
+    if [[ -f "$video" ]]; then video="$(realpath -- "$video")"; else video=""; fi
 
     # Already registered (by either path)? -> skip.
     if [[ -n "$(sqlite3 "$DB_PATH" \
-        "SELECT 1 FROM media WHERE video_path='$(esc "$video")' \
-            OR (audio_path<>'' AND audio_path='$(esc "$audio")') LIMIT 1;")" ]]; then
+        "SELECT 1 FROM media WHERE audio_path='$(esc "$audio")' \
+            OR (video_path<>'' AND video_path='$(esc "$video")') LIMIT 1;")" ]]; then
         continue
     fi
 
@@ -69,9 +76,8 @@ for video in "$DEST"/*.mp4; do
         date="$date_raw"
     fi
 
-    # Duration (s) from the audio sidecar if present, else the video.
-    probe="${audio:-$video}"
-    dur="$(ffprobe -v error -show_entries format=duration -of csv=p=0 -- "$probe" 2>/dev/null || true)"
+    # Duration (s) from the audio file.
+    dur="$(ffprobe -v error -show_entries format=duration -of csv=p=0 -- "$audio" 2>/dev/null || true)"
     dur="${dur%.*}"               # drop fractional part
     [[ "$dur" =~ ^[0-9]+$ ]] && (( dur > 0 )) || dur=7200
 
@@ -93,16 +99,21 @@ for video in "$DEST"/*.mp4; do
 done
 
 # Prune: drop rows for files WE manage (under $DEST) that no longer exist on disk
-# — e.g. videos the downloader rotated out. Path matching is done in bash so there's
-# no LIKE/GLOB escaping to worry about; rows outside $DEST are never touched.
+# — e.g. recordings the downloader rotated out. A row is judged by its audio file
+# (the thing the player streams), falling back to video_path for pre-audio-only
+# rows that have no audio. So deleting a leftover .mp4 next to a live .m4a does
+# NOT drop the row, and listening progress survives. Path matching is done in bash
+# so there's no LIKE/GLOB escaping to worry about; rows outside $DEST are never touched.
 pruned=0
-while IFS=$'\t' read -r id vpath; do
+while IFS=$'\t' read -r id vpath apath; do
     [[ -n "$id" ]] || continue
-    [[ "$vpath" == "$DEST/"* ]] || continue
-    [[ -f "$vpath" ]] && continue
+    path="${apath:-$vpath}"
+    [[ -n "$path" ]] || continue
+    [[ "$path" == "$DEST/"* ]] || continue
+    [[ -f "$path" ]] && continue
     sqlite3 "$DB_PATH" "DELETE FROM media WHERE id=$id;"
-    echo "pruned: $vpath"
+    echo "pruned: $path"
     pruned=$((pruned + 1))
-done < <(sqlite3 -separator $'\t' "$DB_PATH" "SELECT id, video_path FROM media;")
+done < <(sqlite3 -separator $'\t' "$DB_PATH" "SELECT id, video_path, audio_path FROM media;")
 
-echo "vod-ingest: $added new video(s) registered, $pruned stale row(s) pruned in $DB_PATH"
+echo "vod-ingest: $added new recording(s) registered, $pruned stale row(s) pruned in $DB_PATH"
